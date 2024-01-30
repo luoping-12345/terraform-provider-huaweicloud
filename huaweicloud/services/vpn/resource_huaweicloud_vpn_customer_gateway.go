@@ -77,12 +77,6 @@ func ResourceCustomerGateway() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 			},
-			"tags": {
-				Type:     schema.TypeMap,
-				Elem:     &schema.Schema{Type: schema.TypeString},
-				Optional: true,
-				Computed: true,
-			},
 			"serial_number": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -177,7 +171,6 @@ func buildCreateCustomerGatewayCustomerGatewayChildBody(d *schema.ResourceData) 
 		"ip":         utils.ValueIngoreEmpty(d.Get("ip")),
 		"bgp_asn":    utils.ValueIngoreEmpty(d.Get("asn")),
 		"route_mode": utils.ValueIngoreEmpty(d.Get("route_mode")),
-		"tags":       utils.ValueIngoreEmpty(utils.ExpandResourceTags(d.Get("tags").(map[string]interface{}))),
 	}
 	if certificateContent, ok := d.GetOk("certificate_content"); ok {
 		params["ca_certificate"] = map[string]interface{}{
@@ -245,7 +238,6 @@ func resourceCustomerGatewayRead(_ context.Context, d *schema.ResourceData, meta
 			getCustomerGatewayRespBody, nil)),
 		d.Set("created_at", utils.PathSearch("customer_gateway.created_at", getCustomerGatewayRespBody, nil)),
 		d.Set("updated_at", utils.PathSearch("customer_gateway.updated_at", getCustomerGatewayRespBody, nil)),
-		d.Set("tags", utils.FlattenTagsToMap(utils.PathSearch("customer_gateway.tags", getCustomerGatewayRespBody, nil))),
 	)
 
 	return diag.FromErr(mErr.ErrorOrNil())
@@ -285,18 +277,6 @@ func resourceCustomerGatewayUpdate(ctx context.Context, d *schema.ResourceData, 
 		_, err = updateCustomerGatewayClient.Request("PUT", updateCustomerGatewayPath, &updateCustomerGatewayOpt)
 		if err != nil {
 			return diag.Errorf("error updating CustomerGateway: %s", err)
-		}
-	}
-
-	// update tags
-	if d.HasChange("tags") {
-		client, err := cfg.NewServiceClient("vpn", region)
-		if err != nil {
-			return diag.Errorf("error creating customer gateway client: %s", err)
-		}
-		tagErr := updateTags(client, d, "customer-gateway", d.Id())
-		if tagErr != nil {
-			return diag.Errorf("error updating tags of customer gateway (%s): %s", d.Id(), tagErr)
 		}
 	}
 	return resourceCustomerGatewayRead(ctx, d, meta)

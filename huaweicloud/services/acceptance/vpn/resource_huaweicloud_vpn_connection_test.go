@@ -80,8 +80,6 @@ func TestAccConnection_basic(t *testing.T) {
 						"huaweicloud_vpn_gateway.test", "master_eip.0.id"),
 					resource.TestCheckResourceAttrPair(rName, "customer_gateway_id",
 						"huaweicloud_vpn_customer_gateway.test", "id"),
-					resource.TestCheckResourceAttr(rName, "tags.key", "val"),
-					resource.TestCheckResourceAttr(rName, "tags.foo", "bar"),
 				),
 			},
 			{
@@ -95,8 +93,6 @@ func TestAccConnection_basic(t *testing.T) {
 					resource.TestCheckResourceAttr(rName, "ipsecpolicy.0.authentication_algorithm", "sha2-512"),
 					resource.TestCheckResourceAttr(rName, "ipsecpolicy.0.encryption_algorithm", "aes-256"),
 					resource.TestCheckResourceAttr(rName, "ipsecpolicy.0.lifetime_seconds", "7200"),
-					resource.TestCheckResourceAttr(rName, "tags.key", "val"),
-					resource.TestCheckResourceAttr(rName, "tags.foo", "bar-update"),
 				),
 			},
 			{
@@ -169,11 +165,6 @@ resource "huaweicloud_vpn_connection" "test" {
   peer_subnets        = ["192.168.55.0/24"]
   vpn_type            = "static"
   psk                 = "Test@123"
-
-  tags = {
-    key = "val"
-    foo = "bar"
-  }
 }
 `, testGateway_basic(name), testCustomerGateway_basic(name, ipAddress), name)
 }
@@ -202,11 +193,6 @@ resource "huaweicloud_vpn_connection" "test" {
     authentication_algorithm = "sha2-512"
     encryption_algorithm     = "aes-256"
     lifetime_seconds         = 7200
-  }
-
-  tags = {
-    key = "val"
-    foo = "bar-update"
   }
 }
 `, testGateway_basic(name), testCustomerGateway_basic(name, ipAddress), name)
