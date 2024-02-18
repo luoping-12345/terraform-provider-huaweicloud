@@ -28,6 +28,9 @@ import (
 	"github.com/huaweicloud/terraform-provider-huaweicloud/huaweicloud/utils"
 )
 
+const NON_FIXED_P1 = "Professional1-NonFixedIP"
+const NON_FIXED_P2 = "Professional2-NonFixedIP"
+
 // @API VPN POST /v5/{project_id}/vpn-gateways
 // @API VPN POST /v5/{project_id}/vpn-gateways/{gateway_id}/certificate
 // @API VPN PUT /v5/{project_id}/vpn-gateways/{id}
@@ -84,6 +87,7 @@ func ResourceGateway() *schema.Resource {
 				Description: `The flavor of the VPN gateway.`,
 				ValidateFunc: validation.StringInSlice([]string{
 					"V1G", "V300", "Basic", "Professional1", "Professional2", "GM",
+					NON_FIXED_P1, NON_FIXED_P2,
 				}, false),
 			},
 			"attachment_type": {
@@ -230,6 +234,13 @@ func ResourceGateway() *schema.Resource {
 				Elem:     gatewayCertificateSchema(),
 			},
 			"tags": common.TagsSchema(),
+			"policy_template": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Computed: true,
+				MaxItems: 1,
+				Elem:     GatewayPolicyTemplateSchema(),
+			},
 			"status": {
 				Type:        schema.TypeString,
 				Computed:    true,
@@ -424,6 +435,73 @@ func GatewayEipSchema() *schema.Resource {
 	}
 	return &sc
 }
+func GatewayPolicyTemplateSchema() *schema.Resource {
+	sc := schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"ike_policy": {
+				Type:     schema.TypeList,
+				Elem:     gatewayIkePolicySchema(),
+				MaxItems: 1,
+				Computed: true,
+			},
+			"ipsec_policy": {
+				Type:     schema.TypeList,
+				Elem:     gatewayIpsecPolicySchema(),
+				MaxItems: 1,
+				Computed: true,
+			},
+		},
+	}
+	return &sc
+}
+
+func gatewayIkePolicySchema() *schema.Resource {
+	sc := schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"encryption_algorithm": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"dh_group": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"authentication_algorithm": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"lifetime_seconds": {
+				Type:     schema.TypeInt,
+				Computed: true,
+			},
+		},
+	}
+	return &sc
+}
+
+func gatewayIpsecPolicySchema() *schema.Resource {
+	sc := schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"authentication_algorithm": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"encryption_algorithm": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"pfs": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"lifetime_seconds": {
+				Type:     schema.TypeInt,
+				Computed: true,
+			},
+		},
+	}
+	return &sc
+}
 
 func resourceGatewayCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	cfg := meta.(*config.Config)
@@ -500,7 +578,49 @@ func resourceGatewayCreate(ctx context.Context, d *schema.ResourceData, meta int
 			return diag.Errorf("error waiting for creating VPN gateway (%s) certificate to complete: %s", d.Id(), err)
 		}
 	}
+
+	flavor := d.Get("flavor").(string)
+	flavors := []string{NON_FIXED_P1, NON_FIXED_P1}
+	if utils.StrSliceContains(flavors, flavor) {
+		createPolicyTemplateHttpUrl := "v5/{project_id}/vpn-gateways/{id}"
+
+		createPolicyTemplatePath := createGatewayClient.Endpoint + createPolicyTemplateHttpUrl
+		createPolicyTemplatePath = strings.ReplaceAll(
+			createPolicyTemplatePath, "{project_id}", createGatewayClient.ProjectID)
+		createPolicyTemplatePath = strings.ReplaceAll(createPolicyTemplatePath, "{id}", d.Id())
+
+		updateGatewayOpt := golangsdk.RequestOpts{
+			KeepResponseBody: true,
+			OkCodes: []int{
+				200,
+			},
+		}
+		updateGatewayOpt.JSONBody = utils.RemoveNil(buildCreateGatewayPolicyTemplateBodyParams(d))
+		_, err := createGatewayClient.Request("PUT", createPolicyTemplatePath, &updateGatewayOpt)
+		if err != nil {
+			return diag.Errorf("error creating VPN gateway policy template: %s", err)
+		}
+		err = updateGatewayWaitingForStateCompleted(ctx, d, meta, d.Timeout(schema.TimeoutUpdate))
+		if err != nil {
+			return diag.Errorf("error waiting for creating VPN gateway (%s) "+
+				"policy template to complete: %s", d.Id(), err)
+		}
+	}
 	return resourceGatewayRead(ctx, d, meta)
+}
+
+func buildCreateGatewayPolicyTemplateBodyParams(d *schema.ResourceData) map[string]interface{} {
+	bodyParams := map[string]interface{}{
+		"vpn_gateway": buildCreatePolicyTemplateVPNGatewayChildBody(d),
+	}
+	return bodyParams
+}
+
+func buildCreatePolicyTemplateVPNGatewayChildBody(d *schema.ResourceData) map[string]interface{} {
+	params := map[string]interface{}{
+		"policy_template": buildUpdateGatewayPolicyTemplateChildBody(d),
+	}
+	return params
 }
 
 func buildCreateGatewayCertificateBodyParams(certificateContent interface{}) map[string]interface{} {
@@ -799,7 +919,68 @@ func resourceGatewayRead(_ context.Context, d *schema.ResourceData, meta interfa
 			d.Set("certificate", flattenGatewayCertificateResponse(d, getGatewayCertificateRespBody)),
 		)
 	}
+
+	flavor := d.Get("flavor").(string)
+	flavors := []string{NON_FIXED_P1, NON_FIXED_P1}
+	if utils.StrSliceContains(flavors, flavor) {
+		d.Set("policy_template", flattenGetGatewayResponseBodyPolicyTemplateBody(getGatewayRespBody))
+	}
 	return diag.FromErr(mErr.ErrorOrNil())
+}
+
+func flattenGetGatewayResponseBodyPolicyTemplateBody(resp interface{}) []interface{} {
+	var rst []interface{}
+	curJson, err := jmespath.Search("vpn_gateway.policy_template", resp)
+	if err != nil {
+		log.Printf("[ERROR] error parsing vpn_gateway.policy_template from response: %s", err)
+		return rst
+	}
+
+	rst = []interface{}{
+		map[string]interface{}{
+			"ike_policy":   flattenPolicyTemplateBodyIkePolicyResponse(curJson),
+			"ipsec_policy": flattenPolicyTemplateBodyIpsecPolicyResponse(curJson),
+		},
+	}
+	return rst
+}
+
+func flattenPolicyTemplateBodyIkePolicyResponse(resp interface{}) []interface{} {
+	var rst []interface{}
+	curJson, err := jmespath.Search(fmt.Sprintf("ike_policy"), resp)
+	if err != nil {
+		log.Printf("[ERROR] error parsing ike_policy from response: %s", err)
+		return rst
+	}
+
+	rst = []interface{}{
+		map[string]interface{}{
+			"encryption_algorithm":     utils.PathSearch("encryption_algorithm", curJson, nil),
+			"dh_group":                 utils.PathSearch("dh_group", curJson, nil),
+			"authentication_algorithm": utils.PathSearch("authentication_algorithm", curJson, nil),
+			"lifetime_seconds":         utils.PathSearch("lifetime_seconds", curJson, nil),
+		},
+	}
+	return rst
+}
+
+func flattenPolicyTemplateBodyIpsecPolicyResponse(resp interface{}) []interface{} {
+	var rst []interface{}
+	curJson, err := jmespath.Search(fmt.Sprintf("ipsec_policy"), resp)
+	if err != nil {
+		log.Printf("[ERROR] error parsing ipsec_policy from response: %s", err)
+		return rst
+	}
+
+	rst = []interface{}{
+		map[string]interface{}{
+			"authentication_algorithm": utils.PathSearch("authentication_algorithm", curJson, nil),
+			"encryption_algorithm":     utils.PathSearch("encryption_algorithm", curJson, nil),
+			"pfs":                      utils.PathSearch("pfs", curJson, nil),
+			"lifetime_seconds":         utils.PathSearch("lifetime_seconds", curJson, nil),
+		},
+	}
+	return rst
 }
 
 func flattenGatewayCertificateResponse(d *schema.ResourceData, resp interface{}) []interface{} {
@@ -871,6 +1052,7 @@ func resourceGatewayUpdate(ctx context.Context, d *schema.ResourceData, meta int
 	updateGatewayHasChanges := []string{
 		"local_subnets",
 		"name",
+		"policy_template",
 	}
 
 	if d.HasChanges(updateGatewayHasChanges...) {
@@ -974,10 +1156,63 @@ func buildUpdateGatewayBodyParams(d *schema.ResourceData) map[string]interface{}
 
 func buildUpdateGatewayVpnGatewayChildBody(d *schema.ResourceData) map[string]interface{} {
 	params := map[string]interface{}{
-		"local_subnets": utils.ValueIngoreEmpty(d.Get("local_subnets")),
-		"name":          utils.ValueIngoreEmpty(d.Get("name")),
+		"local_subnets":   utils.ValueIngoreEmpty(d.Get("local_subnets")),
+		"name":            utils.ValueIngoreEmpty(d.Get("name")),
+		"policy_template": buildUpdateGatewayPolicyTemplateChildBody(d),
 	}
 	return params
+}
+
+func buildUpdateGatewayPolicyTemplateChildBody(d *schema.ResourceData) map[string]interface{} {
+	bodyParams := map[string]interface{}{
+		"ike_policy":   buildUpdateIkePolicyChildBody(d),
+		"ipsec_policy": buildUpdateIpsecPolicyChildBody(d),
+	}
+	return bodyParams
+}
+
+func buildUpdateIkePolicyChildBody(d *schema.ResourceData) map[string]interface{} {
+	if rawArray, ok := d.Get("policy_template.ike_policy").([]interface{}); ok {
+		if len(rawArray) == 0 {
+			return nil
+		}
+
+		raw, ok := rawArray[0].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+
+		params := map[string]interface{}{
+			"encryption_algorithm":     utils.ValueIngoreEmpty(raw["encryption_algorithm"]),
+			"dh_group":                 utils.ValueIngoreEmpty(raw["dh_group"]),
+			"authentication_algorithm": utils.ValueIngoreEmpty(raw["authentication_algorithm"]),
+			"lifetime_seconds":         utils.ValueIngoreEmpty(raw["lifetime_seconds"]),
+		}
+		return params
+	}
+	return nil
+}
+
+func buildUpdateIpsecPolicyChildBody(d *schema.ResourceData) map[string]interface{} {
+	if rawArray, ok := d.Get("policy_template.ipsec_policy").([]interface{}); ok {
+		if len(rawArray) == 0 {
+			return nil
+		}
+
+		raw, ok := rawArray[0].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+
+		params := map[string]interface{}{
+			"authentication_algorithm": utils.ValueIngoreEmpty(raw["authentication_algorithm"]),
+			"encryption_algorithm":     utils.ValueIngoreEmpty(raw["encryption_algorithm"]),
+			"pfs":                      utils.ValueIngoreEmpty(raw["pfs"]),
+			"lifetime_seconds":         utils.ValueIngoreEmpty(raw["lifetime_seconds"]),
+		}
+		return params
+	}
+	return nil
 }
 
 func updateGatewayWaitingForStateCompleted(ctx context.Context, d *schema.ResourceData, meta interface{}, t time.Duration) error {
