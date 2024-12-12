@@ -29,6 +29,7 @@ import (
 // @API CPH GET /v1/{project_id}/cloud-phone/servers/{server_id}
 // @API CPH PUT /v1/{project_id}/cloud-phone/servers/open-access
 // @API CPH POST /v2/{project_id}/cloud-phone/servers
+// @API CPH POST /v1/{project_id}/cloud-phone/servers/change-server-model
 // @API CPH POST /v1/{project_id}/{resource_type}/{resource_id}/tags/action
 // @API CPH GET /v1/{project_id}/{resource_type}/{resource_id}/tags
 // @API BSS POST /v2/orders/subscriptions/resources/unsubscribe
@@ -65,13 +66,11 @@ func ResourceCphServer() *schema.Resource {
 			"server_flavor": {
 				Type:        schema.TypeString,
 				Required:    true,
-				ForceNew:    true,
 				Description: `The CPH server flavor.`,
 			},
 			"phone_flavor": {
 				Type:        schema.TypeString,
 				Required:    true,
-				ForceNew:    true,
 				Description: `The cloud phone flavor.`,
 			},
 			"image_id": {
@@ -792,6 +791,18 @@ func resourceCphServerUpdate(ctx context.Context, d *schema.ResourceData, meta i
 		}
 	}
 
+	if d.HasChange("server_flavor") {
+		err := updateServerFlavor(client, d)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+
+		err = checkServerStatus(ctx, client, d.Id(), d.Timeout(schema.TimeoutUpdate))
+		if err != nil {
+			return diag.FromErr(err)
+		}
+	}
+
 	if d.HasChange("tags") {
 		if err := updateTags(client, d, "cph-server", d.Id()); err != nil {
 			return diag.Errorf("error updating tags of CPH server %s: %s", d.Id(), err)
@@ -1028,4 +1039,37 @@ func getServerTags(client *golangsdk.ServiceClient, id string) (interface{}, err
 	}
 
 	return result, nil
+}
+
+func updateServerFlavor(client *golangsdk.ServiceClient, d *schema.ResourceData) error {
+	// updateCphServerFlavor: update CPH server flavor
+	updateCphServerFlavorHttpUrl := "v1/{project_id}/cloud-phone/servers/change-server-model"
+
+	updateCphServerFlavorPath := client.Endpoint + updateCphServerFlavorHttpUrl
+	updateCphServerFlavorPath = strings.ReplaceAll(updateCphServerFlavorPath, "{project_id}", client.ProjectID)
+	updateCphServerFlavorPath = strings.ReplaceAll(updateCphServerFlavorPath, "{server_id}", d.Id())
+
+	updateCphServerFlavorOpt := golangsdk.RequestOpts{
+		KeepResponseBody: true,
+	}
+	updateCphServerFlavorOpt.JSONBody = utils.RemoveNil(buildUpdateCphServerFlavorBodyParams(d))
+	_, err := client.Request("POST", updateCphServerFlavorPath, &updateCphServerFlavorOpt)
+	if err != nil {
+		return fmt.Errorf("error updating CPH server flavor: %s", err)
+	}
+
+	return nil
+}
+
+func buildUpdateCphServerFlavorBodyParams(d *schema.ResourceData) map[string]interface{} {
+	bodyParams := map[string]interface{}{
+		"server_id":         d.Id(),
+		"server_model_name": utils.ValueIgnoreEmpty(d.Get("server_flavor")),
+		"phone_model_name":  utils.ValueIgnoreEmpty(d.Get("phone_flavor")),
+		"extend_param": map[string]interface{}{
+			"is_auto_pay": 1,
+		},
+	}
+
+	return bodyParams
 }

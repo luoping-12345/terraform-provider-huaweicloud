@@ -55,13 +55,9 @@ The following arguments are supported:
   The name can contain `1` to `60` characters, only English letters, Chinese characters, digits, underscore (_) and
   hyphens (-) are allowed.
 
-* `server_flavor` - (Required, String, ForceNew) The CPH server flavor.
+* `server_flavor` - (Required, String) Specifies the CPH server flavor.
 
-  Changing this parameter will create a new resource.
-
-* `phone_flavor` - (Required, String, ForceNew) The cloud phone flavor.
-
-  Changing this parameter will create a new resource.
+* `phone_flavor` - (Required, String) Specifies the cloud phone flavor.
   
 * `image_id` - (Required, String, ForceNew) The cloud phone image ID.
 
